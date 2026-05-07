@@ -13,7 +13,7 @@ Spring Clean never changes GitHub. It does not delete branches, close pull reque
 - Lists branches, latest activity, protection/default status, and associated pull requests.
 - Lists currently open pull requests, including drafts.
 - Adds cleanup status and reason columns to guide review.
-- Adds blank `review_action` and `review_comment` columns for team notes.
+- Adds editable `review_action` and `review_comment` columns for team decisions.
 - Writes timestamped local files so reports do not overwrite each other.
 - Can list repositories available to your GitHub token.
 
@@ -82,6 +82,7 @@ Spring Clean opens on the reports list. From there you can:
 - list repositories available to your token
 - run a new audit
 - search and filter rows
+- tag branch and pull request rows for follow-up
 - delete old local reports after confirmation
 
 Keyboard controls:
@@ -93,7 +94,11 @@ Keyboard controls:
 | `p` | Show pull request report |
 | `g` | Enter a GitHub repo or URL and run a new audit |
 | `l` | List repositories available to `GITHUB_TOKEN` |
-| `d` | Delete the selected local report after confirmation |
+| `d` | Delete the selected local report, or mark a branch for deletion / PR for closure |
+| `k` | Mark the selected branch or PR as keep |
+| `r` | Mark the selected branch or PR as review |
+| `c` | Add or edit a short review comment |
+| `u` | Clear the selected review action and comment |
 | `enter` | Load the selected report or audit the selected GitHub repo |
 | `/` | Focus search |
 | `s` | Cycle filters |
@@ -102,6 +107,8 @@ Keyboard controls:
 | `q` | Quit |
 
 Delete only removes local Spring Clean report files. GitHub is not changed.
+
+Review tags are saved back into the selected branch or pull request CSV. They do not call the GitHub API.
 
 ## Running Audits From The Command Line
 
@@ -182,7 +189,7 @@ The branch CSV includes:
 - GitHub-like activity bucket
 - associated pull request numbers, authors, states, and URLs
 - cleanup status and reason
-- blank `review_action` and `review_comment` columns
+- editable `review_action` and `review_comment` columns
 
 GitHub does not expose a durable branch creator field through the branch API. `branch_created_by` is inferred in this order:
 
@@ -225,7 +232,7 @@ It includes:
 - age columns
 - GitHub URL
 - cleanup status and reason
-- blank `review_action` and `review_comment` columns
+- editable `review_action` and `review_comment` columns
 
 Pull request cleanup statuses:
 
@@ -252,7 +259,7 @@ Use it as a quick overview before reviewing rows in the browser or CSV.
 
 `Missing GITHUB_TOKEN`
 
-Add `GITHUB_TOKEN` to `.env`, or export it in the shell where you run Spring Clean.
+Add `GITHUB_TOKEN` to `.env`, or set it in the shell where you run Spring Clean.
 
 `Could not access owner/repo`
 
