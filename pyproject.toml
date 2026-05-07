@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "springclean-audit"
+version = "0.1.0"
+description = "Spring Clean is a read-only GitHub repository cleanup audit tool."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Mario Ribeiro" }
+]
+keywords = ["github", "audit", "branches", "pull-requests", "cleanup"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development :: Version Control :: Git",
+]
+dependencies = [
+  "textual>=8.2.5",
+]
+
+[project.optional-dependencies]
+dev = [
+  "coverage[toml]>=7.13.5",
+  "pytest>=9.0.3",
+  "ruff>=0.15.12",
+]
+
+[project.scripts]
+springclean = "springclean.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["springclean"]
+omit = ["src/springclean/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
