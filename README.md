@@ -170,12 +170,6 @@ reports/marioribeiro_springclean_20260507T134500Z_summary.md
 
 Generated reports may contain private repo names, branch names, pull request titles, and usernames. Treat them as internal artifacts when auditing private repositories.
 
-If you already have reports in an older `export/` folder, open that folder with:
-
-```bash
-springclean --reports-dir export
-```
-
 ## Branch Report
 
 The branch CSV includes:
