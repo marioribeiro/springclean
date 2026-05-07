@@ -36,19 +36,13 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-Install Spring Clean locally:
+Install Spring Clean:
 
 ```bash
-python -m pip install -e .
+python -m pip install springclean
 ```
 
-Create your local `.env` file:
-
-```bash
-cp .env.example .env
-```
-
-Add your GitHub token to `.env`:
+Create a local `.env` file in the directory where you will run Spring Clean:
 
 ```bash
 GITHUB_TOKEN=ghp_your_token_here
@@ -65,7 +59,7 @@ If your machine uses `python3` and `pip3`, use these instead:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python3 -m pip install -e .
+python3 -m pip install springclean
 ```
 
 ## Using The Browser
@@ -274,7 +268,7 @@ The token may not have enough permission, the API rate limit may be exhausted, o
 Try the same command with `python3`:
 
 ```bash
-python3 -m pip install -e .
+python3 -m pip install springclean
 ```
 
 ## For Developers
@@ -283,6 +277,12 @@ Install development dependencies:
 
 ```bash
 python -m pip install -e ".[dev]"
+```
+
+Create a local `.env` file from the example when working from the repository:
+
+```bash
+cp .env.example .env
 ```
 
 Run tests:
@@ -301,11 +301,43 @@ ruff check .
 ruff format --check .
 ```
 
+Build and check the package:
+
+```bash
+python -m build
+python -m twine check dist/*
+```
+
 Useful local checks:
 
 ```bash
 springclean --help
 springclean repo --help
+```
+
+## Publishing
+
+The PyPI package name is `springclean`.
+
+Publishing uses PyPI Trusted Publishing through GitHub Actions. Before the first release, create pending trusted publishers in PyPI and TestPyPI with these values:
+
+| Field | PyPI | TestPyPI |
+| --- | --- | --- |
+| PyPI project name | `springclean` | `springclean` |
+| Owner | `marioribeiro` | `marioribeiro` |
+| Repository | `springclean` | `springclean` |
+| Workflow | `publish.yml` | `publish.yml` |
+| Environment | `pypi` | `testpypi` |
+
+Require manual approval for the `pypi` GitHub environment before publishing real releases.
+
+To test the package flow without publishing to PyPI, run the `Publish` workflow manually. That publishes to TestPyPI.
+
+To publish a real release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 Main runtime dependency:
