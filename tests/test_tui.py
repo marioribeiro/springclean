@@ -45,6 +45,7 @@ from springclean.tui import (
     report_sources,
     row_cells,
     run_browser,
+    save_csv_report,
     status_text,
     table_columns,
     total_count,
@@ -477,12 +478,78 @@ def test_delete_report_confirm_button_paths(tmp_path: Path) -> None:
     assert [call.args[0] for call in dismiss.call_args_list] == [True, False, True, False]
 
 
-def test_browser_mounts_and_handles_actions() -> None:
+def test_save_csv_report_adds_review_fields_to_older_csv(tmp_path: Path) -> None:
+    path = tmp_path / "legacy_branches.csv"
+    write_report(path, ["repo", "branch", "github_branch_bucket"], [{"repo": "owner/repo", "branch": "old"}])
+    report = ReportData(
+        kind=BRANCH_KIND,
+        path=path,
+        rows=[
+            {
+                "repo": "owner/repo",
+                "branch": "old",
+                "github_branch_bucket": "stale",
+                "review_action": "delete",
+                "review_comment": "safe to remove",
+                "extra_context": "kept",
+            }
+        ],
+        fieldnames=["repo", "branch", "github_branch_bucket"],
+    )
+
+    save_csv_report(report)
+
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        row = next(reader)
+
+    assert reader.fieldnames == [
+        "repo",
+        "branch",
+        "github_branch_bucket",
+        "review_action",
+        "review_comment",
+        "extra_context",
+    ]
+    assert row["review_action"] == "delete"
+    assert row["review_comment"] == "safe to remove"
+    assert row["extra_context"] == "kept"
+
+
+def test_browser_mounts_and_handles_actions(tmp_path: Path) -> None:
+    branch_path = tmp_path / "branches.csv"
+    pr_path = tmp_path / "pull_requests.csv"
+    write_report(
+        branch_path,
+        BRANCH_FIELDS,
+        [
+            {
+                "repo": "owner/repo",
+                "branch": "feature/example",
+                "github_branch_bucket": "stale",
+                "cleanup_status": "candidate_stale_no_pr",
+                "associated_pr_numbers": "",
+            }
+        ],
+    )
+    write_report(
+        pr_path,
+        PR_FIELDS,
+        [
+            {
+                "repo": "owner/repo",
+                "number": "42",
+                "title": "Review this",
+                "draft": "True",
+                "cleanup_status": "draft_stale",
+            }
+        ],
+    )
     app = SpringCleanBrowser(
         reports=[
             ReportData(
                 kind=BRANCH_KIND,
-                path=Path("branches.csv"),
+                path=branch_path,
                 rows=[
                     {
                         "repo": "owner/repo",
@@ -495,7 +562,7 @@ def test_browser_mounts_and_handles_actions() -> None:
             ),
             ReportData(
                 kind=PR_KIND,
-                path=Path("pull_requests.csv"),
+                path=pr_path,
                 rows=[
                     {
                         "repo": "owner/repo",
@@ -518,12 +585,25 @@ def test_browser_mounts_and_handles_actions() -> None:
             app.action_show_prs()
             assert app.active_kind == PR_KIND
             app.action_delete_report()
-            assert "Open reports" in app.message
+            assert app.reports[PR_KIND].rows[0]["review_action"] == "close"
             app.action_cycle_filter()
             assert app.filter_mode == "stale"
 
             app.action_show_branches()
             assert app.active_kind == BRANCH_KIND
+            app.action_delete_report()
+            assert app.reports[BRANCH_KIND].rows[0]["review_action"] == "delete"
+            app.action_mark_keep()
+            assert app.reports[BRANCH_KIND].rows[0]["review_action"] == "keep"
+            app.action_mark_review()
+            assert app.reports[BRANCH_KIND].rows[0]["review_action"] == "review"
+            app.action_comment_review()
+            assert app.command_mode == "review_comment"
+            app.on_input_submitted(SimpleNamespace(input=SimpleNamespace(id="search"), value="ask Mario"))
+            assert app.reports[BRANCH_KIND].rows[0]["review_comment"] == "ask Mario"
+            app.action_clear_review()
+            assert app.reports[BRANCH_KIND].rows[0]["review_action"] == ""
+            assert app.reports[BRANCH_KIND].rows[0]["review_comment"] == ""
             app.action_cycle_filter()
             assert app.filter_mode == "stale"
 
@@ -542,6 +622,47 @@ def test_browser_mounts_and_handles_actions() -> None:
             app.on_data_table_row_selected(SimpleNamespace(cursor_row=0))
             app.on_input_changed(SimpleNamespace(input=SimpleNamespace(id="other"), value="ignored"))
             app.on_input_submitted(SimpleNamespace(input=SimpleNamespace(id="other"), value="ignored"))
+
+    asyncio.run(run_app())
+
+    with branch_path.open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["review_action"] == ""
+    assert row["review_comment"] == ""
+
+
+def test_browser_review_actions_require_selected_report_row(tmp_path: Path) -> None:
+    app = SpringCleanBrowser(
+        reports=[
+            ReportData(
+                kind=BRANCH_KIND,
+                path=tmp_path / "branches.csv",
+                rows=[],
+                fieldnames=BRANCH_FIELDS,
+            )
+        ],
+    )
+
+    async def run_app() -> None:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            app.action_delete_report()
+            assert app.message == "Select a branch or pull request row first."
+
+            app.action_clear_review()
+            assert app.message == "Select a branch or pull request row first."
+
+            app.action_comment_review()
+            assert app.message == "Select a branch or pull request row first."
+
+            app.command_mode = "review_comment"
+            app.on_input_submitted(SimpleNamespace(input=SimpleNamespace(id="search"), value="ignored"))
+            assert app.message == "No branch or pull request row selected."
+
+            app.active_kind = GITHUB_REPO_KIND
+            app.action_delete_report()
+            assert "Open reports" in app.message
 
     asyncio.run(run_app())
 

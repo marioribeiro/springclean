@@ -31,7 +31,7 @@ def main() -> int:
         owner, repo = parse_repo(args.repo)
         token = github_token()
         if not token:
-            raise SpringCleanError("Missing GITHUB_TOKEN. Add it to .env or export it in your shell.")
+            raise SpringCleanError("Missing GITHUB_TOKEN. Add it to .env or set it in your shell.")
         client = GitHubClient(token=token)
         audit_repo(
             client=client,

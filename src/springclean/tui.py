@@ -44,6 +44,7 @@ class ReportData:
     kind: str
     path: Path
     rows: list[dict[str, str]]
+    fieldnames: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,14 @@ class AuditResult:
     owner: str
     repo: str
     reports: list[ReportData]
+
+
+@dataclass(frozen=True)
+class ReviewTarget:
+    kind: str
+    label: str
+    report: ReportData
+    row: dict[str, str]
 
 
 def run_browser(reports_dir: Path) -> None:
@@ -150,8 +159,9 @@ def load_csv_report(path: Path, expected_kind: str | None = None) -> ReportData:
         reader = csv.DictReader(handle)
         rows = [dict(row) for row in reader]
 
-    kind = expected_kind or detect_report_kind(path, reader.fieldnames or [])
-    return ReportData(kind=kind, path=path, rows=rows)
+    fieldnames = reader.fieldnames or []
+    kind = expected_kind or detect_report_kind(path, fieldnames)
+    return ReportData(kind=kind, path=path, rows=rows, fieldnames=fieldnames)
 
 
 def detect_report_kind(path: Path, fields: list[str]) -> str:
@@ -315,7 +325,11 @@ class SpringCleanBrowser(App[None]):
         ("p", "show_prs", "PRs"),
         ("g", "github_input", "Audit Repo"),
         ("l", "list_repos", "GitHub Repos"),
-        ("d", "delete_report", "Delete Report"),
+        ("d", "delete_report", "Delete/Close"),
+        ("k", "mark_keep", "Keep"),
+        ("r", "mark_review", "Review"),
+        ("c", "comment_review", "Comment"),
+        ("u", "clear_review", "Clear Tag"),
         ("s", "cycle_filter", "Filter"),
         ("a", "show_all", "All"),
         ("/", "focus_search", "Search"),
@@ -341,6 +355,7 @@ class SpringCleanBrowser(App[None]):
         self.visible_sources: list[ReportSource] = []
         self.message = ""
         self.loading_message = ""
+        self.pending_review_target: ReviewTarget | None = None
 
     def compose(self) -> ComposeResult:
         yield Static("", id="title")
@@ -396,7 +411,7 @@ class SpringCleanBrowser(App[None]):
         try:
             token = github_token()
             if not token:
-                raise SpringCleanError("Missing GITHUB_TOKEN. Add it to .env or export it in your shell.")
+                raise SpringCleanError("Missing GITHUB_TOKEN. Add it to .env or set it in your shell.")
         except SpringCleanError as exc:
             self.message = str(exc)
             self.update_status()
@@ -420,6 +435,10 @@ class SpringCleanBrowser(App[None]):
         )
 
     def action_delete_report(self) -> None:
+        if self.active_kind in {BRANCH_KIND, PR_KIND}:
+            self.mark_selected_review(delete_action(self.active_kind))
+            return
+
         if self.active_kind != SOURCE_KIND:
             self.message = "Open reports with o before deleting a report."
             self.update_status()
@@ -435,6 +454,41 @@ class SpringCleanBrowser(App[None]):
             DeleteReportConfirm(source),
             callback=lambda confirmed, source=source: self.delete_report_after_confirmation(source, confirmed),
         )
+
+    def action_mark_keep(self) -> None:
+        self.mark_selected_review("keep")
+
+    def action_mark_review(self) -> None:
+        self.mark_selected_review("review")
+
+    def action_clear_review(self) -> None:
+        target = self.selected_review_target()
+        if target is None:
+            self.message = "Select a branch or pull request row first."
+            self.update_status()
+            return
+
+        target.row["review_action"] = ""
+        target.row["review_comment"] = ""
+        save_csv_report(target.report)
+        self.message = f"Cleared review tag for {target.label}."
+        self.refresh_report()
+
+    def action_comment_review(self) -> None:
+        target = self.selected_review_target()
+        if target is None:
+            self.message = "Select a branch or pull request row first."
+            self.update_status()
+            return
+
+        self.pending_review_target = target
+        self.command_mode = "review_comment"
+        command = self.query_one("#search", Input)
+        command.value = target.row.get("review_comment", "")
+        command.placeholder = "Enter a review comment, then press Enter"
+        command.focus()
+        self.message = f"Editing comment for {target.label}."
+        self.update_status()
 
     def action_cycle_filter(self) -> None:
         modes = filter_modes(self.active_kind)
@@ -452,6 +506,7 @@ class SpringCleanBrowser(App[None]):
 
     def action_clear_search(self) -> None:
         self.command_mode = None
+        self.pending_review_target = None
         self.search_text = ""
         self.reset_input(input_placeholder(self.active_kind))
         self.refresh_active_view()
@@ -468,10 +523,18 @@ class SpringCleanBrowser(App[None]):
         self.refresh_active_view()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id != "search" or self.command_mode != "audit_repo":
+        if event.input.id != "search":
             return
-        self.command_mode = None
-        self.run_audit(event.value)
+        if self.command_mode == "audit_repo":
+            self.command_mode = None
+            self.run_audit(event.value)
+        elif self.command_mode == "review_comment":
+            target = self.pending_review_target
+            self.command_mode = None
+            self.pending_review_target = None
+            self.apply_review_comment(target, event.value)
+            self.reset_input(input_placeholder(self.active_kind))
+            self.query_one("#results", DataTable).focus()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self.update_detail_for_index(event.cursor_row)
@@ -642,6 +705,45 @@ class SpringCleanBrowser(App[None]):
         index = min(max(table.cursor_row, 0), len(self.visible_sources) - 1)
         return self.visible_sources[index]
 
+    def selected_review_target(self) -> ReviewTarget | None:
+        if self.active_kind not in {BRANCH_KIND, PR_KIND} or not self.visible_rows:
+            return None
+        table = self.query_one("#results", DataTable)
+        index = min(max(table.cursor_row, 0), len(self.visible_rows) - 1)
+        row = self.visible_rows[index]
+        report = self.reports[self.active_kind]
+        return ReviewTarget(
+            kind=self.active_kind,
+            label=review_target_label(self.active_kind, row),
+            report=report,
+            row=row,
+        )
+
+    def mark_selected_review(self, action: str) -> None:
+        target = self.selected_review_target()
+        if target is None:
+            self.message = "Select a branch or pull request row first."
+            self.update_status()
+            return
+
+        target.row["review_action"] = action
+        target.row.setdefault("review_comment", "")
+        save_csv_report(target.report)
+        self.message = f"Marked {target.label} as {action}."
+        self.refresh_report()
+
+    def apply_review_comment(self, target: ReviewTarget | None, comment: str) -> None:
+        if target is None:
+            self.message = "No branch or pull request row selected."
+            self.update_status()
+            return
+
+        target.row.setdefault("review_action", "")
+        target.row["review_comment"] = comment
+        save_csv_report(target.report)
+        self.message = f"Updated comment for {target.label}."
+        self.refresh_report()
+
     def delete_report_after_confirmation(self, source: ReportSource, confirmed: bool | None) -> None:
         if not confirmed:
             self.message = "Delete cancelled."
@@ -671,7 +773,7 @@ class SpringCleanBrowser(App[None]):
             owner, repo = parse_repo_reference(repo_ref)
             token = github_token()
             if not token:
-                raise SpringCleanError("Missing GITHUB_TOKEN. Add it to .env or export it in your shell.")
+                raise SpringCleanError("Missing GITHUB_TOKEN. Add it to .env or set it in your shell.")
         except SpringCleanError as exc:
             self.message = str(exc)
             self.update_status()
@@ -703,8 +805,8 @@ def table_columns(kind: str) -> list[str]:
     if kind == GITHUB_REPO_KIND:
         return ["Repository", "Private", "Archived", "Updated", "Default"]
     if kind == BRANCH_KIND:
-        return ["Branch", "Age", "Bucket", "Status", "Owner", "PRs", "Protected"]
-    return ["PR", "Title", "State", "Draft", "Updated", "Author", "Status"]
+        return ["Branch", "Age", "Bucket", "Status", "Review", "Owner", "PRs", "Protected"]
+    return ["PR", "Title", "State", "Draft", "Updated", "Author", "Status", "Review"]
 
 
 def row_cells(kind: str, row: dict[str, Any]) -> list[str]:
@@ -730,6 +832,7 @@ def row_cells(kind: str, row: dict[str, Any]) -> list[str]:
             str(row.get("days_since_last_commit", "")),
             str(row.get("github_branch_bucket", "")),
             str(row.get("cleanup_status", "")),
+            str(row.get("review_action", "")),
             str(row.get("branch_created_by", "")),
             str(row.get("associated_pr_numbers", "")),
             str(row.get("protected", "")),
@@ -742,7 +845,41 @@ def row_cells(kind: str, row: dict[str, Any]) -> list[str]:
         str(row.get("days_since_updated", "")),
         str(row.get("created_by", "")),
         str(row.get("cleanup_status", "")),
+        str(row.get("review_action", "")),
     ]
+
+
+def save_csv_report(report: ReportData) -> None:
+    fields = list(report.fieldnames or csv_fieldnames(report.path))
+    for field in ("review_action", "review_comment"):
+        if field not in fields:
+            fields.append(field)
+    for row in report.rows:
+        for field in row:
+            if field not in fields:
+                fields.append(field)
+
+    tmp_path = report.path.with_name(f"{report.path.name}.tmp")
+    with tmp_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(report.rows)
+    tmp_path.replace(report.path)
+
+
+def csv_fieldnames(path: Path) -> list[str]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        return csv.DictReader(handle).fieldnames or []
+
+
+def delete_action(kind: str) -> str:
+    return "close" if kind == PR_KIND else "delete"
+
+
+def review_target_label(kind: str, row: dict[str, Any]) -> str:
+    if kind == BRANCH_KIND:
+        return str(row.get("branch", "branch"))
+    return prefixed_pr_number(str(row.get("number", ""))) or "pull request"
 
 
 def report_source_row(source: ReportSource) -> dict[str, str]:
@@ -956,10 +1093,10 @@ def title_text(report: ReportData) -> str:
 
 def status_text(active_kind: str, visible_count: int, total_count: int, filter_mode: str) -> str:
     mode = filter_mode.replace("_", " ")
-    return (
-        f"{visible_count}/{total_count} rows | view: {view_name(active_kind)} | filter: {mode} | "
-        "o reports | g audit | l repos | b branches | p PRs | / search | s filter | q quit"
-    )
+    shortcuts = "o reports | g audit | l repos | b branches | p PRs | / search | s filter | q quit"
+    if active_kind in {BRANCH_KIND, PR_KIND}:
+        shortcuts = f"d {delete_action(active_kind)} | k keep | r review | c comment | u clear | {shortcuts}"
+    return f"{visible_count}/{total_count} rows | view: {view_name(active_kind)} | filter: {mode} | {shortcuts}"
 
 
 def total_count(
