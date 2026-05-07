@@ -520,7 +520,10 @@ class SpringCleanBrowser(App[None]):
         if event.input.id != "search" or self.command_mode:
             return
         self.search_text = event.value
-        self.refresh_active_view()
+        try:
+            self.refresh_active_view()
+        except NoMatches:
+            return
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "search":
@@ -533,7 +536,7 @@ class SpringCleanBrowser(App[None]):
             self.command_mode = None
             self.pending_review_target = None
             self.apply_review_comment(target, event.value)
-            self.reset_input(input_placeholder(self.active_kind))
+            self.reset_input(input_placeholder(self.active_kind), self.search_text)
             self.query_one("#results", DataTable).focus()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
@@ -788,9 +791,9 @@ class SpringCleanBrowser(App[None]):
             thread=True,
         )
 
-    def reset_input(self, placeholder: str) -> None:
+    def reset_input(self, placeholder: str, value: str = "") -> None:
         command = self.query_one("#search", Input)
-        command.value = ""
+        command.value = value
         command.placeholder = placeholder
         self.command_mode = None
 

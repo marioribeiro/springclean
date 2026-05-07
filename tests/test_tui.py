@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import Button, DataTable, LoadingIndicator
+from textual.widgets import Button, DataTable, Input, LoadingIndicator
 
 from springclean.errors import SpringCleanError
 from springclean.reports import BRANCH_FIELDS, PR_FIELDS
@@ -597,10 +597,14 @@ def test_browser_mounts_and_handles_actions(tmp_path: Path) -> None:
             assert app.reports[BRANCH_KIND].rows[0]["review_action"] == "keep"
             app.action_mark_review()
             assert app.reports[BRANCH_KIND].rows[0]["review_action"] == "review"
+            app.on_input_changed(SimpleNamespace(input=SimpleNamespace(id="search"), value="feature"))
+            assert app.search_text == "feature"
             app.action_comment_review()
             assert app.command_mode == "review_comment"
             app.on_input_submitted(SimpleNamespace(input=SimpleNamespace(id="search"), value="ask Mario"))
             assert app.reports[BRANCH_KIND].rows[0]["review_comment"] == "ask Mario"
+            assert app.search_text == "feature"
+            assert app.query_one("#search", Input).value == "feature"
             app.action_clear_review()
             assert app.reports[BRANCH_KIND].rows[0]["review_action"] == ""
             assert app.reports[BRANCH_KIND].rows[0]["review_comment"] == ""
